@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "691701395902",
+    "project_id": "tripcalc-b0cb2",
+    "storage_bucket": "tripcalc-b0cb2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:691701395902:android:c62e6401379b99840009ef",
+        "android_client_info": {
+          "package_name": "com.tripcalc.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDENr0TxAMzt3J9fugC3HsKoeylLQosiZA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

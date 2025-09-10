@@ -1,9 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:trip_calc/trip_details_screen.dart';
 
 import 'add_trip_screen.dart';
-import 'trip_details_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -155,7 +155,8 @@ class HomeScreen extends StatelessWidget {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => TripDetailsScreen(tripId: trip.id),
+                            builder: (_) =>
+                                EnhancedTripDetailsScreen(tripId: trip.id),
                           ),
                         );
                       },

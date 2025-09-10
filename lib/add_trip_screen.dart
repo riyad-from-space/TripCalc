@@ -15,31 +15,46 @@ class _AddTripScreenState extends State<AddTripScreen> {
   final _formKey = GlobalKey<FormState>();
   final _tripNameController = TextEditingController();
   final _peopleController = TextEditingController();
-  final _daysController = TextEditingController();
   bool _loading = false;
 
   Future<void> saveTrip() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final doc = await FirebaseFirestore.instance.collection('trips').add({
-      'userId': user.uid,
-      'tripName': _tripNameController.text.trim(),
-      'totalPeople': int.tryParse(_peopleController.text) ?? 1,
-      'days': int.tryParse(_daysController.text) ?? 1,
-      'status': 'running',
-      'createdAt': FieldValue.serverTimestamp(),
-      'categories': {},
-      'totalCost': 0,
-    });
-    setState(() => _loading = false);
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => TripManagementScreen(tripId: doc.id),
-      ),
-    );
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User not logged in')),
+        );
+        return;
+      }
+
+      final doc = await FirebaseFirestore.instance.collection('trips').add({
+        'userId': user.uid,
+        'tripName': _tripNameController.text.trim(),
+        'totalPeople': int.tryParse(_peopleController.text) ?? 1,
+        'status': 'running',
+        'createdAt': FieldValue.serverTimestamp(),
+        'currentDay': 1,
+        'completedDays': [],
+        'totalCost': 0,
+        'dailyExpenses': {},
+      });
+
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TripManagementScreen(tripId: doc.id),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating trip: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -89,17 +104,6 @@ class _AddTripScreenState extends State<AddTripScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _daysController,
-                      decoration: const InputDecoration(
-                          labelText: 'Total Days *',
-                          prefixIcon: Icon(Icons.calendar_today)),
-                      keyboardType: TextInputType.number,
-                      validator: (v) => (int.tryParse(v ?? '') ?? 0) <= 0
-                          ? 'Must be > 0'
-                          : null,
-                    ),
                     const SizedBox(height: 24),
                     _loading
                         ? const CircularProgressIndicator()
@@ -115,5 +119,12 @@ class _AddTripScreenState extends State<AddTripScreen> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _tripNameController.dispose();
+    _peopleController.dispose();
+    super.dispose();
   }
 }

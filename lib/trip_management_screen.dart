@@ -47,6 +47,88 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
     loadTripData();
   }
 
+  // ---------------- NEW METHOD ----------------
+  Future<void> _showExpenseInsights() async {
+    final dailyExpenses =
+        Map<String, dynamic>.from(tripData['dailyExpenses'] ?? {});
+    final completedDays = List<int>.from(tripData['completedDays'] ?? []);
+
+    if (completedDays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No completed days to analyze')),
+      );
+      return;
+    }
+
+    // Calculate insights
+    double totalSpent = 0;
+    Map<String, double> categoryTotals = {};
+
+    for (int day in completedDays) {
+      final dayData = dailyExpenses['day_$day'] as Map<String, dynamic>? ?? {};
+      final expenses = dayData['expenses'] as Map<String, dynamic>? ?? {};
+
+      expenses.forEach((category, amount) {
+        final cost = (amount ?? 0).toDouble();
+        totalSpent += cost;
+        categoryTotals[category] = (categoryTotals[category] ?? 0) + cost;
+      });
+    }
+
+    // Find highest spending category
+    String topCategory = '';
+    double topAmount = 0;
+    categoryTotals.forEach((category, amount) {
+      if (amount > topAmount) {
+        topAmount = amount;
+        topCategory = category;
+      }
+    });
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Expense Insights'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Total Spent: ৳${totalSpent.toStringAsFixed(2)}'),
+              Text(
+                  'Average per Day: ৳${(totalSpent / completedDays.length).toStringAsFixed(2)}'),
+              if (topCategory.isNotEmpty)
+                Text(
+                    'Highest Category: $topCategory (৳${topAmount.toStringAsFixed(2)})'),
+              const SizedBox(height: 16),
+              const Text('Category Breakdown:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              ...categoryTotals.entries.map((entry) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                            child: Text(entry.key,
+                                overflow: TextOverflow.ellipsis)),
+                        Text('৳${entry.value.toStringAsFixed(2)}'),
+                      ],
+                    ),
+                  )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+  // --------------------------------------------
+
   Future<void> loadTripData() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -70,7 +152,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
           _loading = false;
         });
 
-        // Initialize controllers with existing expense data
         _initializeControllers();
       } else {
         throw Exception('Trip not found');
@@ -88,13 +169,11 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
   void _initializeControllers() {
     _expenseControllers.clear();
 
-    // Initialize controllers for existing expenses
     todayExpenses.forEach((key, value) {
       _expenseControllers[key] =
           TextEditingController(text: value == 0 ? '' : value.toString());
     });
 
-    // Ensure all predefined categories have controllers
     predefinedCategories.forEach((mainCategory, subCategories) {
       for (String subCategory in subCategories) {
         final key = '$mainCategory ($subCategory)';
@@ -129,7 +208,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
         'date': FieldValue.serverTimestamp(),
       };
 
-      // Calculate new total cost from all days
       double totalCost = 0;
       dailyExpenses.forEach((day, data) {
         if (data is Map && data.containsKey('total')) {
@@ -137,7 +215,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
         }
       });
 
-      // Update Firestore
       await FirebaseFirestore.instance
           .collection('trips')
           .doc(widget.tripId)
@@ -147,7 +224,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Update local state
       setState(() {
         todayExpenses = updatedExpenses;
         tripData['dailyExpenses'] = dailyExpenses;
@@ -170,7 +246,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
 
   Future<void> completeCurrentDay() async {
     try {
-      // First save current day
       await saveCurrentDay();
 
       final completedDays = List<int>.from(tripData['completedDays'] ?? []);
@@ -194,11 +269,7 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
         tripData['completedDays'] = completedDays;
         tripData['currentDay'] = newCurrentDay;
         todayExpenses = {};
-
-        // Clear and reinitialize controllers for new day
-        _expenseControllers.forEach((key, controller) {
-          controller.clear();
-        });
+        _expenseControllers.forEach((key, controller) => controller.clear());
       });
 
       if (mounted) {
@@ -345,6 +416,11 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
             },
             tooltip: 'View Completed Days',
           ),
+          IconButton(
+            icon: const Icon(Icons.analytics),
+            onPressed: _showExpenseInsights,
+            tooltip: 'View Insights',
+          ),
           if (!isCompleted)
             IconButton(
               icon: const Icon(Icons.check_circle),
@@ -377,7 +453,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                   ),
                 ),
               ),
-            // Today's Summary
             Card(
               margin: const EdgeInsets.all(16),
               elevation: 4,
@@ -397,10 +472,8 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Today\'s Total',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
+                        Text('Today\'s Total',
+                            style: Theme.of(context).textTheme.titleMedium),
                         Text(
                           '৳${todayTotal.toStringAsFixed(2)}',
                           style:
@@ -442,18 +515,14 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                 ),
               ),
             ),
-
-            // Expenses List
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 children: [
                   ...predefinedCategories.entries.map((categoryEntry) {
                     return ExpansionTile(
-                      title: Text(
-                        categoryEntry.key,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      title: Text(categoryEntry.key,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
                       leading: Icon(_getCategoryIcon(categoryEntry.key)),
                       children: categoryEntry.value.map((subcategory) {
                         final key = '${categoryEntry.key} ($subcategory)';
@@ -462,8 +531,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                       }).toList(),
                     );
                   }).toList(),
-
-                  // Custom categories
                   if (_expenseControllers.keys.any((key) =>
                       !predefinedCategories.values.any((subcats) =>
                           subcats.any((sub) => key.contains(sub))))) ...[
@@ -480,7 +547,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                             entry.key, entry.key, isCompleted))
                         .toList(),
                   ],
-
                   const SizedBox(height: 100),
                 ],
               ),
@@ -521,7 +587,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
   }
 
   Widget _buildExpenseField(String key, String displayName, bool isReadOnly) {
-    // Ensure controller exists
     if (!_expenseControllers.containsKey(key)) {
       final existingValue = todayExpenses[key] ?? 0;
       _expenseControllers[key] = TextEditingController(
@@ -532,10 +597,7 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          Expanded(
-            flex: 3,
-            child: Text(displayName),
-          ),
+          Expanded(flex: 3, child: Text(displayName)),
           Expanded(
             flex: 2,
             child: TextField(
@@ -577,17 +639,11 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
       case 'Accommodation':
         return Icons.hotel;
       case 'Activities':
-        return Icons.local_activity;
+        return Icons.sports_soccer;
       case 'Miscellaneous':
         return Icons.more_horiz;
       default:
         return Icons.category;
     }
-  }
-
-  @override
-  void dispose() {
-    _expenseControllers.values.forEach((controller) => controller.dispose());
-    super.dispose();
   }
 }

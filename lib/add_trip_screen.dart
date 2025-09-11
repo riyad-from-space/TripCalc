@@ -15,6 +15,8 @@ class _AddTripScreenState extends State<AddTripScreen> {
   final _formKey = GlobalKey<FormState>();
   final _tripNameController = TextEditingController();
   final _peopleController = TextEditingController();
+  final _durationController = TextEditingController();
+  final _budgetController = TextEditingController();
   bool _loading = false;
 
   Future<void> saveTrip() async {
@@ -34,6 +36,8 @@ class _AddTripScreenState extends State<AddTripScreen> {
         'userId': user.uid,
         'tripName': _tripNameController.text.trim(),
         'totalPeople': int.tryParse(_peopleController.text) ?? 1,
+        'expectedDuration': int.tryParse(_durationController.text) ?? 1,
+        'expectedBudget': double.tryParse(_budgetController.text) ?? 0,
         'status': 'running',
         'createdAt': FieldValue.serverTimestamp(),
         'currentDay': 1,
@@ -66,8 +70,9 @@ class _AddTripScreenState extends State<AddTripScreen> {
           child: Card(
             elevation: 4,
             margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(28.0),
               child: Form(
@@ -75,19 +80,21 @@ class _AddTripScreenState extends State<AddTripScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Start a New Trip',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(
+                    Text(
+                      'Start a New Trip',
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
                                 color: Colors.deepPurple,
-                                fontWeight: FontWeight.bold)),
+                                fontWeight: FontWeight.bold,
+                              ),
+                    ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _tripNameController,
                       decoration: const InputDecoration(
-                          labelText: 'Trip Name *',
-                          prefixIcon: Icon(Icons.card_travel)),
+                        labelText: 'Trip Name *',
+                        prefixIcon: Icon(Icons.card_travel),
+                      ),
                       validator: (v) =>
                           v == null || v.trim().isEmpty ? 'Required' : null,
                     ),
@@ -95,14 +102,38 @@ class _AddTripScreenState extends State<AddTripScreen> {
                     TextFormField(
                       controller: _peopleController,
                       decoration: const InputDecoration(
-                          labelText: 'Total People *',
-                          prefixIcon: Icon(Icons.people)),
+                        labelText: 'Total People *',
+                        prefixIcon: Icon(Icons.people),
+                      ),
                       keyboardType: TextInputType.number,
                       validator: (v) {
                         final n = int.tryParse(v ?? '');
                         if (n == null || n <= 0) return 'Must be > 0';
                         return null;
                       },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _durationController,
+                      decoration: const InputDecoration(
+                        labelText: 'Trip Duration (days) *',
+                        prefixIcon: Icon(Icons.event),
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final n = int.tryParse(v ?? '');
+                        if (n == null || n <= 0) return 'Must be > 0';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _budgetController,
+                      decoration: const InputDecoration(
+                        labelText: 'Expected Budget (৳) - Optional',
+                        prefixIcon: Icon(Icons.monetization_on),
+                      ),
+                      keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 24),
                     _loading
@@ -125,6 +156,8 @@ class _AddTripScreenState extends State<AddTripScreen> {
   void dispose() {
     _tripNameController.dispose();
     _peopleController.dispose();
+    _durationController.dispose();
+    _budgetController.dispose();
     super.dispose();
   }
 }

@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'completed_days_screen.dart';
 
 class TripManagementScreen extends StatefulWidget {
   final String tripId;
@@ -13,13 +13,12 @@ class TripManagementScreen extends StatefulWidget {
 
 class _TripManagementScreenState extends State<TripManagementScreen> {
   Map<String, dynamic> tripData = {};
-  Map<String, dynamic> categories = {};
+  Map<String, dynamic> todayExpenses = {};
   bool _loading = true;
+  int currentDay = 1;
 
-  // Controllers for expense input
   final _expenseControllers = <String, TextEditingController>{};
 
-  // Predefined categories with subcategories
   final Map<String, List<String>> predefinedCategories = {
     'Transportation': [
       'Vehicle Rental',
@@ -56,37 +55,85 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
           .get();
 
       if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
         setState(() {
-          tripData = doc.data() as Map<String, dynamic>;
-          categories = Map<String, dynamic>.from(tripData['categories'] ?? {});
+          tripData = data;
+          currentDay = tripData['currentDay'] ?? 1;
+          final dailyExpenses =
+              Map<String, dynamic>.from(tripData['dailyExpenses'] ?? {});
+
+          // Load current day expenses
+          final dayKey = 'day_$currentDay';
+          final dayData = dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
+          todayExpenses = Map<String, dynamic>.from(dayData['expenses'] ?? {});
+
           _loading = false;
         });
 
-        // Initialize controllers for existing categories
-        categories.forEach((key, value) {
-          _expenseControllers[key] =
-              TextEditingController(text: value.toString());
-        });
+        // Initialize controllers with existing expense data
+        _initializeControllers();
+      } else {
+        throw Exception('Trip not found');
       }
     } catch (e) {
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading trip: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading trip: ${e.toString()}')),
+        );
+      }
     }
   }
 
-  Future<void> saveExpenses() async {
+  void _initializeControllers() {
+    _expenseControllers.clear();
+
+    // Initialize controllers for existing expenses
+    todayExpenses.forEach((key, value) {
+      _expenseControllers[key] =
+          TextEditingController(text: value == 0 ? '' : value.toString());
+    });
+
+    // Ensure all predefined categories have controllers
+    predefinedCategories.forEach((mainCategory, subCategories) {
+      for (String subCategory in subCategories) {
+        final key = '$mainCategory ($subCategory)';
+        if (!_expenseControllers.containsKey(key)) {
+          final existingValue = todayExpenses[key] ?? 0;
+          _expenseControllers[key] = TextEditingController(
+              text: existingValue == 0 ? '' : existingValue.toString());
+        }
+      }
+    });
+  }
+
+  Future<void> saveCurrentDay() async {
     try {
-      // Calculate total cost
-      double totalCost = 0;
-      final updatedCategories = <String, dynamic>{};
+      double dayTotal = 0;
+      final updatedExpenses = <String, dynamic>{};
 
       _expenseControllers.forEach((category, controller) {
-        final amount = double.tryParse(controller.text) ?? 0;
+        final amount = double.tryParse(controller.text.trim()) ?? 0;
         if (amount > 0) {
-          updatedCategories[category] = amount;
-          totalCost += amount;
+          updatedExpenses[category] = amount;
+          dayTotal += amount;
+        }
+      });
+
+      final dailyExpenses =
+          Map<String, dynamic>.from(tripData['dailyExpenses'] ?? {});
+
+      dailyExpenses['day_$currentDay'] = {
+        'expenses': updatedExpenses,
+        'total': dayTotal,
+        'date': FieldValue.serverTimestamp(),
+      };
+
+      // Calculate new total cost from all days
+      double totalCost = 0;
+      dailyExpenses.forEach((day, data) {
+        if (data is Map && data.containsKey('total')) {
+          totalCost += (data['total'] ?? 0).toDouble();
         }
       });
 
@@ -95,24 +142,129 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
           .collection('trips')
           .doc(widget.tripId)
           .update({
-        'categories': updatedCategories,
+        'dailyExpenses': dailyExpenses,
         'totalCost': totalCost,
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
+      // Update local state
       setState(() {
-        categories = updatedCategories;
+        todayExpenses = updatedExpenses;
+        tripData['dailyExpenses'] = dailyExpenses;
         tripData['totalCost'] = totalCost;
-        tripData['categories'] = updatedCategories;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Expenses saved successfully!')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Day $currentDay expenses saved!')),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving expenses: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving expenses: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  Future<void> completeCurrentDay() async {
+    try {
+      // First save current day
+      await saveCurrentDay();
+
+      final completedDays = List<int>.from(tripData['completedDays'] ?? []);
+      if (!completedDays.contains(currentDay)) {
+        completedDays.add(currentDay);
+      }
+
+      final newCurrentDay = currentDay + 1;
+
+      await FirebaseFirestore.instance
+          .collection('trips')
+          .doc(widget.tripId)
+          .update({
+        'completedDays': completedDays,
+        'currentDay': newCurrentDay,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        currentDay = newCurrentDay;
+        tripData['completedDays'] = completedDays;
+        tripData['currentDay'] = newCurrentDay;
+        todayExpenses = {};
+
+        // Clear and reinitialize controllers for new day
+        _expenseControllers.forEach((key, controller) {
+          controller.clear();
+        });
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Day ${currentDay - 1} marked as complete!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error completing day: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  Future<void> markTripComplete() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Complete Trip'),
+        content: const Text(
+            'Are you sure you want to mark this trip as complete? No more days can be added after this.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Complete Trip'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        await saveCurrentDay();
+        final completedDays = List<int>.from(tripData['completedDays'] ?? []);
+        if (!completedDays.contains(currentDay)) {
+          completedDays.add(currentDay);
+        }
+
+        await FirebaseFirestore.instance
+            .collection('trips')
+            .doc(widget.tripId)
+            .update({
+          'status': 'completed',
+          'completedDays': completedDays,
+          'completedAt': FieldValue.serverTimestamp(),
+        });
+
+        if (mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Trip marked as complete!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error completing trip: ${e.toString()}')),
+          );
+        }
+      }
     }
   }
 
@@ -154,17 +306,17 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
     );
   }
 
-  double get totalCost {
+  double get todayTotal {
     double total = 0;
     _expenseControllers.forEach((category, controller) {
-      total += double.tryParse(controller.text) ?? 0;
+      total += double.tryParse(controller.text.trim()) ?? 0;
     });
     return total;
   }
 
-  double get costPerPerson {
+  double get todayCostPerPerson {
     final people = tripData['totalPeople'] ?? 1;
-    return people > 0 ? totalCost / people : 0;
+    return people > 0 ? todayTotal / people : 0;
   }
 
   @override
@@ -175,15 +327,30 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
       );
     }
 
+    final isCompleted = tripData['status'] == 'completed';
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(tripData['tripName'] ?? 'Trip Management'),
+        title: Text('${tripData['tripName']} - Day $currentDay'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: saveExpenses,
-            tooltip: 'Save Expenses',
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CompletedDaysScreen(tripId: widget.tripId),
+                ),
+              );
+            },
+            tooltip: 'View Completed Days',
           ),
+          if (!isCompleted)
+            IconButton(
+              icon: const Icon(Icons.check_circle),
+              onPressed: markTripComplete,
+              tooltip: 'Complete Trip',
+            ),
         ],
       ),
       body: Container(
@@ -196,7 +363,21 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
         ),
         child: Column(
           children: [
-            // Trip Summary Card
+            if (isCompleted)
+              Container(
+                width: double.infinity,
+                color: Colors.orange,
+                padding: const EdgeInsets.all(8),
+                child: const Text(
+                  'Trip Completed - Read Only',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            // Today's Summary
             Card(
               margin: const EdgeInsets.all(16),
               elevation: 4,
@@ -206,15 +387,22 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
+                    Text(
+                      'Day $currentDay Expenses',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Total Cost',
+                          'Today\'s Total',
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         Text(
-                          '₹${totalCost.toStringAsFixed(2)}',
+                          '৳${todayTotal.toStringAsFixed(2)}',
                           style:
                               Theme.of(context).textTheme.titleLarge?.copyWith(
                                     color: Colors.deepPurple,
@@ -230,11 +418,26 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                         Text(
                             'Cost per Person (${tripData['totalPeople']} people)'),
                         Text(
-                          '₹${costPerPerson.toStringAsFixed(2)}',
+                          '৳${todayCostPerPerson.toStringAsFixed(2)}',
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
+                    if (tripData['totalCost'] != null) ...[
+                      const Divider(),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Trip Total'),
+                          Text(
+                            '৳${(tripData['totalCost'] ?? 0).toStringAsFixed(2)}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -245,7 +448,6 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 children: [
-                  // Predefined categories
                   ...predefinedCategories.entries.map((categoryEntry) {
                     return ExpansionTile(
                       title: Text(
@@ -254,11 +456,9 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                       ),
                       leading: Icon(_getCategoryIcon(categoryEntry.key)),
                       children: categoryEntry.value.map((subcategory) {
-                        final key = '${categoryEntry.key} (${subcategory})';
-                        if (!_expenseControllers.containsKey(key)) {
-                          _expenseControllers[key] = TextEditingController();
-                        }
-                        return _buildExpenseField(key, subcategory);
+                        final key = '${categoryEntry.key} ($subcategory)';
+                        return _buildExpenseField(
+                            key, subcategory, isCompleted);
                       }).toList(),
                     );
                   }).toList(),
@@ -276,41 +476,58 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
                         .where((entry) => !predefinedCategories.values.any(
                             (subcats) =>
                                 subcats.any((sub) => entry.key.contains(sub))))
-                        .map(
-                            (entry) => _buildExpenseField(entry.key, entry.key))
+                        .map((entry) => _buildExpenseField(
+                            entry.key, entry.key, isCompleted))
                         .toList(),
                   ],
 
-                  const SizedBox(height: 80), // Space for FAB
+                  const SizedBox(height: 100),
                 ],
               ),
             ),
           ],
         ),
       ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: 'addCustom',
-            onPressed: addCustomCategory,
-            backgroundColor: Colors.green,
-            child: const Icon(Icons.add),
-            tooltip: 'Add Custom Category',
-          ),
-          const SizedBox(height: 12),
-          FloatingActionButton(
-            heroTag: 'save',
-            onPressed: saveExpenses,
-            child: const Icon(Icons.save),
-            tooltip: 'Save Expenses',
-          ),
-        ],
-      ),
+      floatingActionButton: isCompleted
+          ? null
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'addCustom',
+                  onPressed: addCustomCategory,
+                  backgroundColor: Colors.green,
+                  child: const Icon(Icons.add),
+                  tooltip: 'Add Custom Category',
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: 'save',
+                  onPressed: saveCurrentDay,
+                  child: const Icon(Icons.save),
+                  tooltip: 'Save Day',
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton(
+                  heroTag: 'complete',
+                  onPressed: completeCurrentDay,
+                  backgroundColor: Colors.orange,
+                  child: const Icon(Icons.check),
+                  tooltip: 'Complete Day',
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _buildExpenseField(String key, String displayName) {
+  Widget _buildExpenseField(String key, String displayName, bool isReadOnly) {
+    // Ensure controller exists
+    if (!_expenseControllers.containsKey(key)) {
+      final existingValue = todayExpenses[key] ?? 0;
+      _expenseControllers[key] = TextEditingController(
+          text: existingValue == 0 ? '' : existingValue.toString());
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -323,26 +540,29 @@ class _TripManagementScreenState extends State<TripManagementScreen> {
             flex: 2,
             child: TextField(
               controller: _expenseControllers[key],
-              keyboardType: TextInputType.number,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              enabled: !isReadOnly,
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))
               ],
               decoration: const InputDecoration(
-                prefixText: '₹',
+                prefixText: '৳',
                 hintText: '0',
                 contentPadding:
                     EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               ),
-              onChanged: (value) => setState(() {}), // Update totals
+              onChanged: (value) => setState(() {}),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.clear, size: 16),
-            onPressed: () {
-              _expenseControllers[key]?.clear();
-              setState(() {});
-            },
-          ),
+          if (!isReadOnly)
+            IconButton(
+              icon: const Icon(Icons.clear, size: 16),
+              onPressed: () {
+                _expenseControllers[key]?.clear();
+                setState(() {});
+              },
+            ),
         ],
       ),
     );

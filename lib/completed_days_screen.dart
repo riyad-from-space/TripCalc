@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'day_details_screen.dart';
+import 'package:trip_calc/trip_details_screen.dart';
 
 class CompletedDaysScreen extends StatelessWidget {
   final String tripId;
@@ -162,10 +162,13 @@ class CompletedDaysScreen extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final dayNumber = completedDays[index];
                       final dayKey = 'day_$dayNumber';
-                      final dayData = dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
+                      final dayData =
+                          dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
                       final dayTotal = (dayData['total'] ?? 0).toDouble();
-                      final dayExpenses = dayData['expenses'] as Map<String, dynamic>? ?? {};
-                      final perPersonCost = totalPeople > 0 ? dayTotal / totalPeople : 0;
+                      final dayExpenses =
+                          dayData['expenses'] as Map<String, dynamic>? ?? {};
+                      final perPersonCost =
+                          totalPeople > 0 ? dayTotal / totalPeople : 0;
 
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 6),
@@ -249,4 +252,33 @@ class CompletedDaysScreen extends StatelessWidget {
       String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDec
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: color.withOpacity(0.8),
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -1,26 +1,25 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'trip_management_screen.dart';
 
-class EnhancedTripDetailsScreen extends StatelessWidget {
+class DayDetailsScreen extends StatelessWidget {
   final String tripId;
-  const EnhancedTripDetailsScreen({super.key, required this.tripId});
+  final int dayNumber;
+  final String tripName;
+
+  const DayDetailsScreen({
+    super.key,
+    required this.tripId,
+    required this.dayNumber,
+    required this.tripName,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Trip Details'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.edit),
-            onPressed: () {
-              // Navigate to edit screen
-              Navigator.pushNamed(context, '/trip-management',
-                  arguments: tripId);
-            },
-            tooltip: 'Edit Trip',
-          ),
-        ],
+        title: Text('$tripName - Day $dayNumber'),
+        elevation: 0,
       ),
       body: Container(
         decoration: const BoxDecoration(
@@ -30,52 +29,86 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: FutureBuilder<DocumentSnapshot>(
-          future:
-              FirebaseFirestore.instance.collection('trips').doc(tripId).get(),
+        child: StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('trips')
+              .doc(tripId)
+              .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(
                 child: Text(
-                  'Error loading trip: \n${snapshot.error}',
+                  'Error loading data: ${snapshot.error}',
                   style: const TextStyle(color: Colors.red),
                   textAlign: TextAlign.center,
                 ),
               );
             }
+
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
+
             if (!snapshot.hasData || !snapshot.data!.exists) {
               return const Center(child: Text('Trip not found.'));
             }
 
             final data = snapshot.data!.data() as Map<String, dynamic>;
-            final totalCost = (data['totalCost'] ?? 0).toDouble();
+            final dailyExpenses =
+                Map<String, dynamic>.from(data['dailyExpenses'] ?? {});
+            final dayKey = 'day_$dayNumber';
+            final dayData =
+                dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
+            final dayTotal = (dayData['total'] ?? 0).toDouble();
+            final dayExpensesMap =
+                dayData['expenses'] as Map<String, dynamic>? ?? {};
             final totalPeople = data['totalPeople'] ?? 1;
-            final costPerPerson =
-                totalPeople > 0 ? (totalCost / totalPeople) : 0;
-            final days = data['days'] ?? 1;
-            final categories =
-                data['categories'] as Map<String, dynamic>? ?? {};
+            final perPersonTotal = totalPeople > 0 ? dayTotal / totalPeople : 0;
+
+            // Convert expenses to a list and sort by amount (highest first)
+            final expensesList = dayExpensesMap.entries
+                .map((entry) =>
+                    MapEntry(entry.key, (entry.value ?? 0).toDouble()))
+                .toList()
+              ..sort((a, b) => b.value.compareTo(a.value));
+
+            if (dayExpensesMap.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.receipt_long,
+                      size: 64,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No expenses recorded for Day $dayNumber',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: Colors.grey[600],
+                          ),
+                    ),
+                  ],
+                ),
+              );
+            }
 
             return SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Trip Overview Card
+                  // Day Summary Card
                   Card(
+                    margin: const EdgeInsets.all(16),
                     elevation: 6,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20)),
                     child: Padding(
-                      padding: const EdgeInsets.all(20.0),
+                      padding: const EdgeInsets.all(20),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            data['tripName'] ?? 'Unnamed Trip',
+                            'Day $dayNumber Summary',
                             style: Theme.of(context)
                                 .textTheme
                                 .headlineSmall
@@ -88,18 +121,18 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: _buildStatCard(
-                                  'Total Cost',
-                                  '₹${totalCost.toStringAsFixed(0)}',
+                                child: _buildSummaryItem(
+                                  'Total Spent',
+                                  '৳${dayTotal.toStringAsFixed(2)}',
                                   Icons.account_balance_wallet,
                                   Colors.green,
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: _buildStatCard(
+                                child: _buildSummaryItem(
                                   'Per Person',
-                                  '₹${costPerPerson.toStringAsFixed(0)}',
+                                  '৳${perPersonTotal.toStringAsFixed(2)}',
                                   Icons.person,
                                   Colors.blue,
                                 ),
@@ -110,19 +143,19 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: _buildStatCard(
-                                  'People',
-                                  '$totalPeople',
-                                  Icons.group,
+                                child: _buildSummaryItem(
+                                  'Categories',
+                                  '${expensesList.length}',
+                                  Icons.category,
                                   Colors.orange,
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: _buildStatCard(
-                                  'Days',
-                                  '$days',
-                                  Icons.calendar_today,
+                                child: _buildSummaryItem(
+                                  'People',
+                                  '$totalPeople',
+                                  Icons.group,
                                   Colors.purple,
                                 ),
                               ),
@@ -133,78 +166,96 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
-
                   // Expense Breakdown
-                  if (categories.isNotEmpty) ...[
-                    Text(
-                      'Expense Breakdown',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
+                  Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Expense Breakdown',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                           ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Visual breakdown with progress bars
-                    Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: categories.entries
-                              .where((entry) => (entry.value ?? 0) > 0)
-                              .map((entry) {
-                            final amount = (entry.value ?? 0).toDouble();
+                          const SizedBox(height: 16),
+                          ...expensesList.map((expense) {
+                            final category = expense.key;
+                            final amount = expense.value;
                             final percentage =
-                                totalCost > 0 ? (amount / totalCost) * 100 : 0;
-                            return _buildCategoryBreakdown(
-                              entry.key,
-                              amount,
-                              percentage,
-                              _getCategoryColor(entry.key),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // Per Person Breakdown
-                    Text(
-                      'Cost Per Person',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: categories.entries
-                              .where((entry) => (entry.value ?? 0) > 0)
-                              .map((entry) {
-                            final amount = (entry.value ?? 0).toDouble();
+                                dayTotal > 0 ? (amount / dayTotal) * 100 : 0;
                             final perPersonAmount =
                                 totalPeople > 0 ? amount / totalPeople : 0;
+
+                            return _buildExpenseItem(
+                              category,
+                              amount,
+                              percentage,
+                              perPersonAmount,
+                              _getCategoryColor(category),
+                            );
+                          }).toList(),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Per Person Breakdown
+                  Card(
+                    margin: const EdgeInsets.all(16),
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Cost Per Person Breakdown',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                          ),
+                          const SizedBox(height: 16),
+                          ...expensesList.map((expense) {
+                            final category = expense.key;
+                            final amount = expense.value;
+                            final perPersonAmount =
+                                totalPeople > 0 ? amount / totalPeople : 0;
+
                             return ListTile(
+                              contentPadding:
+                                  const EdgeInsets.symmetric(vertical: 4),
                               leading: CircleAvatar(
-                                backgroundColor: _getCategoryColor(entry.key),
+                                backgroundColor: _getCategoryColor(category),
+                                radius: 20,
                                 child: Icon(
-                                  _getCategoryIcon(entry.key),
+                                  _getCategoryIcon(category),
                                   color: Colors.white,
-                                  size: 20,
+                                  size: 18,
                                 ),
                               ),
-                              title: Text(entry.key),
+                              title: Text(
+                                _getDisplayName(category),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 16,
+                                ),
+                              ),
                               trailing: Text(
-                                '₹${perPersonAmount.toStringAsFixed(2)}',
+                                '৳${perPersonAmount.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
@@ -212,74 +263,38 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
                               ),
                             );
                           }).toList(),
-                        ),
-                      ),
-                    ),
-                  ] else ...[
-                    Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.receipt_long,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No expenses added yet',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  color: Colors.grey[600],
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextButton.icon(
-                            onPressed: () {
-                              Navigator.pushNamed(context, '/trip-management',
-                                  arguments: tripId);
-                            },
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add Expenses'),
+                          const Divider(),
+                          ListTile(
+                            contentPadding:
+                                const EdgeInsets.symmetric(vertical: 4),
+                            leading: const CircleAvatar(
+                              backgroundColor: Colors.deepPurple,
+                              radius: 20,
+                              child: Icon(
+                                Icons.calculate,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                            title: const Text(
+                              'Total Per Person',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                            trailing: Text(
+                              '৳${perPersonTotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: Colors.deepPurple,
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                  ],
-
-                  const SizedBox(height: 24),
-
-                  // Action Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pushNamed(context, '/trip-management',
-                                arguments: tripId);
-                          },
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Edit Expenses'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _showDeleteDialog(context),
-                          icon: const Icon(Icons.delete),
-                          label: const Text('Delete Trip'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
 
                   const SizedBox(height: 32),
@@ -292,7 +307,7 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(
+  Widget _buildSummaryItem(
       String label, String value, IconData icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -319,39 +334,79 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
               fontSize: 12,
               color: color.withOpacity(0.8),
             ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategoryBreakdown(
-      String category, double amount, double percentage, Color color) {
+  Widget _buildExpenseItem(String category, double amount, double percentage,
+      double perPersonAmount, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Text(
-                  category,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
+              CircleAvatar(
+                backgroundColor: color,
+                radius: 16,
+                child: Icon(
+                  _getCategoryIcon(category),
+                  color: Colors.white,
+                  size: 16,
                 ),
               ),
-              Text(
-                '₹${amount.toStringAsFixed(0)} (${percentage.toStringAsFixed(1)}%)',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _getDisplayName(category),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      'Per person: ৳${perPersonAmount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '৳${amount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    '${percentage.toStringAsFixed(1)}%',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
           LinearProgressIndicator(
             value: percentage / 100,
             backgroundColor: Colors.grey[200],
             valueColor: AlwaysStoppedAnimation<Color>(color),
-            minHeight: 6,
+            minHeight: 4,
           ),
         ],
       ),
@@ -359,55 +414,67 @@ class EnhancedTripDetailsScreen extends StatelessWidget {
   }
 
   Color _getCategoryColor(String category) {
-    final colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.indigo,
-      Colors.pink,
-    ];
-    return colors[category.hashCode % colors.length];
+    // Extract main category if it's in format "Category (Subcategory)"
+    final mainCategory =
+        category.contains('(') ? category.split('(')[0].trim() : category;
+
+    switch (mainCategory) {
+      case 'Transportation':
+        return Colors.blue;
+      case 'Food':
+        return Colors.green;
+      case 'Accommodation':
+        return Colors.orange;
+      case 'Activities':
+        return Colors.purple;
+      case 'Miscellaneous':
+        return Colors.teal;
+      default:
+        // Generate a consistent color based on category name hash
+        final colors = [
+          Colors.red,
+          Colors.indigo,
+          Colors.pink,
+          Colors.cyan,
+          Colors.amber,
+          Colors.deepOrange,
+          Colors.lightGreen,
+          Colors.brown,
+        ];
+        return colors[category.hashCode.abs() % colors.length];
+    }
   }
 
   IconData _getCategoryIcon(String category) {
-    if (category.toLowerCase().contains('transport'))
-      return Icons.directions_car;
-    if (category.toLowerCase().contains('food')) return Icons.restaurant;
-    if (category.toLowerCase().contains('accommodation') ||
-        category.toLowerCase().contains('hotel')) return Icons.hotel;
-    if (category.toLowerCase().contains('activit')) return Icons.local_activity;
-    return Icons.attach_money;
+    // Extract main category if it's in format "Category (Subcategory)"
+    final mainCategory =
+        category.contains('(') ? category.split('(')[0].trim() : category;
+
+    switch (mainCategory) {
+      case 'Transportation':
+        return Icons.directions_car;
+      case 'Food':
+        return Icons.restaurant;
+      case 'Accommodation':
+        return Icons.hotel;
+      case 'Activities':
+        return Icons.local_activity;
+      case 'Miscellaneous':
+        return Icons.more_horiz;
+      default:
+        return Icons.category;
+    }
   }
 
-  void _showDeleteDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Trip'),
-        content: const Text(
-            'Are you sure you want to delete this trip? This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              await FirebaseFirestore.instance
-                  .collection('trips')
-                  .doc(tripId)
-                  .delete();
-              Navigator.of(context).pop();
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
+  String _getDisplayName(String category) {
+    // If it's in format "Category (Subcategory)", extract the subcategory
+    if (category.contains('(') && category.contains(')')) {
+      final parts = category.split('(');
+      if (parts.length == 2) {
+        final subcategory = parts[1].replaceAll(')', '').trim();
+        return subcategory;
+      }
+    }
+    return category;
   }
 }

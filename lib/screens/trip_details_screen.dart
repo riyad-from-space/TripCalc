@@ -1,6 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'trip_management_screen.dart';
+
+import '../models/expense_categories.dart';
+import '../models/trip_model.dart';
+import '../services/trip_service.dart';
+import '../widgets/summary_item_widget.dart';
 
 class DayDetailsScreen extends StatelessWidget {
   final String tripId;
@@ -29,11 +32,8 @@ class DayDetailsScreen extends StatelessWidget {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('trips')
-              .doc(tripId)
-              .snapshots(),
+        child: StreamBuilder<Trip?>(
+          stream: TripService.getTripStream(tripId),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(
@@ -49,20 +49,19 @@ class DayDetailsScreen extends StatelessWidget {
               return const Center(child: CircularProgressIndicator());
             }
 
-            if (!snapshot.hasData || !snapshot.data!.exists) {
+            final trip = snapshot.data;
+            if (trip == null) {
               return const Center(child: Text('Trip not found.'));
             }
 
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            final dailyExpenses =
-                Map<String, dynamic>.from(data['dailyExpenses'] ?? {});
+            final dailyExpenses = trip.dailyExpenses;
             final dayKey = 'day_$dayNumber';
             final dayData =
                 dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
             final dayTotal = (dayData['total'] ?? 0).toDouble();
             final dayExpensesMap =
                 dayData['expenses'] as Map<String, dynamic>? ?? {};
-            final totalPeople = data['totalPeople'] ?? 1;
+            final totalPeople = trip.totalPeople;
             final perPersonTotal = totalPeople > 0 ? dayTotal / totalPeople : 0;
 
             // Convert expenses to a list and sort by amount (highest first)
@@ -121,20 +120,21 @@ class DayDetailsScreen extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: _buildSummaryItem(
-                                  'Total Spent',
-                                  '৳${dayTotal.toStringAsFixed(2)}',
-                                  Icons.account_balance_wallet,
-                                  Colors.green,
+                                child: SummaryItemWidget(
+                                  label: 'Total Spent',
+                                  value: '৳${dayTotal.toStringAsFixed(2)}',
+                                  icon: Icons.account_balance_wallet,
+                                  color: Colors.green,
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: _buildSummaryItem(
-                                  'Per Person',
-                                  '৳${perPersonTotal.toStringAsFixed(2)}',
-                                  Icons.person,
-                                  Colors.blue,
+                                child: SummaryItemWidget(
+                                  label: 'Per Person',
+                                  value:
+                                      '৳${perPersonTotal.toStringAsFixed(2)}',
+                                  icon: Icons.person,
+                                  color: Colors.blue,
                                 ),
                               ),
                             ],
@@ -143,20 +143,20 @@ class DayDetailsScreen extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: _buildSummaryItem(
-                                  'Categories',
-                                  '${expensesList.length}',
-                                  Icons.category,
-                                  Colors.orange,
+                                child: SummaryItemWidget(
+                                  label: 'Categories',
+                                  value: '${expensesList.length}',
+                                  icon: Icons.category,
+                                  color: Colors.orange,
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: _buildSummaryItem(
-                                  'People',
-                                  '$totalPeople',
-                                  Icons.group,
-                                  Colors.purple,
+                                child: SummaryItemWidget(
+                                  label: 'People',
+                                  value: '$totalPeople',
+                                  icon: Icons.group,
+                                  color: Colors.purple,
                                 ),
                               ),
                             ],
@@ -202,7 +202,7 @@ class DayDetailsScreen extends StatelessWidget {
                               perPersonAmount,
                               _getCategoryColor(category),
                             );
-                          }).toList(),
+                          }),
                         ],
                       ),
                     ),
@@ -248,7 +248,7 @@ class DayDetailsScreen extends StatelessWidget {
                                 ),
                               ),
                               title: Text(
-                                _getDisplayName(category),
+                                ExpenseCategories.getDisplayName(category),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w500,
                                   fontSize: 16,
@@ -262,7 +262,7 @@ class DayDetailsScreen extends StatelessWidget {
                                 ),
                               ),
                             );
-                          }).toList(),
+                          }),
                           const Divider(),
                           ListTile(
                             contentPadding:
@@ -307,40 +307,6 @@ class DayDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSummaryItem(
-      String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: color,
-            ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: color.withOpacity(0.8),
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildExpenseItem(String category, double amount, double percentage,
       double perPersonAmount, Color color) {
     return Padding(
@@ -364,7 +330,7 @@ class DayDetailsScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _getDisplayName(category),
+                      ExpenseCategories.getDisplayName(category),
                       style: const TextStyle(
                         fontWeight: FontWeight.w500,
                         fontSize: 16,
@@ -464,17 +430,5 @@ class DayDetailsScreen extends StatelessWidget {
       default:
         return Icons.category;
     }
-  }
-
-  String _getDisplayName(String category) {
-    // If it's in format "Category (Subcategory)", extract the subcategory
-    if (category.contains('(') && category.contains(')')) {
-      final parts = category.split('(');
-      if (parts.length == 2) {
-        final subcategory = parts[1].replaceAll(')', '').trim();
-        return subcategory;
-      }
-    }
-    return category;
   }
 }

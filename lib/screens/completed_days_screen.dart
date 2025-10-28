@@ -1,6 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:trip_calc/trip_details_screen.dart';
+import '../models/trip_model.dart';
+import '../services/trip_service.dart';
+import '../widgets/summary_item_widget.dart';
+import 'trip_details_screen.dart';
 
 class CompletedDaysScreen extends StatelessWidget {
   final String tripId;
@@ -21,11 +23,8 @@ class CompletedDaysScreen extends StatelessWidget {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('trips')
-              .doc(tripId)
-              .snapshots(),
+        child: StreamBuilder<Trip?>(
+          stream: TripService.getTripStream(tripId),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return Center(
@@ -41,17 +40,16 @@ class CompletedDaysScreen extends StatelessWidget {
               return const Center(child: CircularProgressIndicator());
             }
 
-            if (!snapshot.hasData || !snapshot.data!.exists) {
+            final trip = snapshot.data;
+            if (trip == null) {
               return const Center(child: Text('Trip not found.'));
             }
 
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            final completedDays = List<int>.from(data['completedDays'] ?? []);
-            final dailyExpenses =
-                Map<String, dynamic>.from(data['dailyExpenses'] ?? {});
-            final totalCost = (data['totalCost'] ?? 0).toDouble();
-            final totalPeople = data['totalPeople'] ?? 1;
-            final tripName = data['tripName'] ?? 'Unnamed Trip';
+            final completedDays = trip.completedDays;
+            final dailyExpenses = trip.dailyExpenses;
+            final totalCost = trip.totalCost;
+            final totalPeople = trip.totalPeople;
+            final tripName = trip.tripName;
 
             if (completedDays.isEmpty) {
               return Center(
@@ -81,7 +79,7 @@ class CompletedDaysScreen extends StatelessWidget {
             }
 
             // Sort completed days
-            completedDays.sort();
+            final sortedDays = List<int>.from(completedDays)..sort();
 
             return Column(
               children: [
@@ -109,20 +107,21 @@ class CompletedDaysScreen extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: _buildSummaryItem(
-                                'Total Cost',
-                                '৳${totalCost.toStringAsFixed(0)}',
-                                Icons.account_balance_wallet,
-                                Colors.green,
+                              child: SummaryItemWidget(
+                                label: 'Total Cost',
+                                value: '৳${totalCost.toStringAsFixed(0)}',
+                                icon: Icons.account_balance_wallet,
+                                color: Colors.green,
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: _buildSummaryItem(
-                                'Per Person',
-                                '৳${(totalCost / totalPeople).toStringAsFixed(0)}',
-                                Icons.person,
-                                Colors.blue,
+                              child: SummaryItemWidget(
+                                label: 'Per Person',
+                                value:
+                                    '৳${(totalCost / totalPeople).toStringAsFixed(0)}',
+                                icon: Icons.person,
+                                color: Colors.blue,
                               ),
                             ),
                           ],
@@ -131,20 +130,20 @@ class CompletedDaysScreen extends StatelessWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: _buildSummaryItem(
-                                'Completed Days',
-                                '${completedDays.length}',
-                                Icons.calendar_today,
-                                Colors.orange,
+                              child: SummaryItemWidget(
+                                label: 'Completed Days',
+                                value: '${completedDays.length}',
+                                icon: Icons.calendar_today,
+                                color: Colors.orange,
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: _buildSummaryItem(
-                                'People',
-                                '$totalPeople',
-                                Icons.group,
-                                Colors.purple,
+                              child: SummaryItemWidget(
+                                label: 'People',
+                                value: '$totalPeople',
+                                icon: Icons.group,
+                                color: Colors.purple,
                               ),
                             ),
                           ],
@@ -158,9 +157,9 @@ class CompletedDaysScreen extends StatelessWidget {
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: completedDays.length,
+                    itemCount: sortedDays.length,
                     itemBuilder: (context, index) {
-                      final dayNumber = completedDays[index];
+                      final dayNumber = sortedDays[index];
                       final dayKey = 'day_$dayNumber';
                       final dayData =
                           dailyExpenses[dayKey] as Map<String, dynamic>? ?? {};
@@ -244,40 +243,6 @@ class CompletedDaysScreen extends StatelessWidget {
             );
           },
         ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryItem(
-      String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: color,
-            ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: color.withOpacity(0.8),
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
       ),
     );
   }

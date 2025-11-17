@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../utils/validators.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onSwitchToSignup;
@@ -53,26 +54,76 @@ class _LoginScreenState extends State<LoginScreen>
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
-    if (email.isEmpty || !email.contains('@')) {
+    // Validate email with regex
+    if (!Validators.isValidEmail(email)) {
       setState(() {
-        error = 'Please enter a valid email.';
+        error = 'Invalid email address. Please enter a valid email.';
         _isLoading = false;
       });
       return;
     }
-    if (password.length < 6) {
+
+    if (password.isEmpty) {
       setState(() {
-        error = 'Password must be at least 6 characters.';
+        error = 'Please enter your password.';
         _isLoading = false;
       });
       return;
     }
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      // Check if email is verified
+      if (userCredential.user != null && !userCredential.user!.emailVerified) {
+        // Sign out immediately
+        await FirebaseAuth.instance.signOut();
+        
+        setState(() {
+          _isLoading = false;
+        });
+
+        // Show dialog - account doesn't exist (not verified means not activated)
+        if (mounted) {
+          showDialog(
+            context: context,
+            useRootNavigator: true, // Use root navigator to prevent StreamBuilder from closing it
+            builder: (context) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.error_outline, color: Colors.red, size: 28),
+                  SizedBox(width: 12),
+                  Text('Account Not Found'),
+                ],
+              ),
+              content: const Text(
+                'This account does not exist. Please open an account.\n\n'
+                'Note: You must verify your email after signing up to activate your account.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+      
+      setState(() {
+        _isLoading = false;
+      });
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        error = _formatErrorMessage(e.code);
+        _isLoading = false;
+      });
     } catch (e) {
       setState(() {
         error = _formatErrorMessage(e.toString());
@@ -81,18 +132,25 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  String _formatErrorMessage(String error) {
-    return error
-        .replaceAll('[firebase_auth/user-not-found]',
-            'No account found with this email.')
-        .replaceAll('[firebase_auth/wrong-password]', 'Incorrect password.')
-        .replaceAll('[firebase_auth/invalid-email]', 'Invalid email address.')
-        .replaceAll(
-            '[firebase_auth/user-disabled]', 'This account has been disabled.')
-        .replaceAll('[firebase_auth/too-many-requests]',
-            'Too many attempts. Please try again later.')
-        .replaceAll('[firebase_auth/network-request-failed]',
-            'Network error. Please check your connection.');
+  String _formatErrorMessage(String errorCode) {
+    switch (errorCode) {
+      case 'user-not-found':
+        return 'No account found with this email. Please sign up first.';
+      case 'wrong-password':
+        return 'Incorrect password. Please try again.';
+      case 'invalid-email':
+        return 'Invalid email address format.';
+      case 'user-disabled':
+        return 'This account has been disabled. Please contact support.';
+      case 'too-many-requests':
+        return 'Too many failed attempts. Please try again later.';
+      case 'network-request-failed':
+        return 'Network error. Please check your connection.';
+      case 'invalid-credential':
+        return 'Invalid email or password. Please check your credentials.';
+      default:
+        return 'An error occurred. Please try again.';
+    }
   }
 
   @override

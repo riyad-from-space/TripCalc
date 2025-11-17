@@ -1,5 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../utils/validators.dart';
+import '../widgets/custom_text_field.dart';
+import '../widgets/password_strength_indicator.dart';
+import '../widgets/error_message.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onSwitchToLogin;
@@ -15,11 +19,12 @@ class _SignupScreenState extends State<SignupScreen>
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
   String? error;
-  bool _isLoading = false;
   bool _passwordVisible = false;
   bool _confirmPasswordVisible = false;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  int _passwordStrength = 0;
+  String _passwordFeedback = '';
 
   @override
   void initState() {
@@ -36,6 +41,14 @@ class _SignupScreenState extends State<SignupScreen>
       curve: Curves.easeInOut,
     ));
     _animationController.forward();
+
+    // Listen to password changes for strength indicator
+    passwordController.addListener(() {
+      setState(() {
+        _passwordStrength = Validators.getPasswordStrength(passwordController.text);
+        _passwordFeedback = Validators.getPasswordFeedback(passwordController.text);
+      });
+    });
   }
 
   @override
@@ -48,65 +61,167 @@ class _SignupScreenState extends State<SignupScreen>
   }
 
   String _formatErrorMessage(String error) {
-    return error
-        .replaceAll(
-            '[firebase_auth/email-already-in-use]', 'This email is already registered.')
-        .replaceAll('[firebase_auth/invalid-email]', 'Invalid email address.')
-        .replaceAll('[firebase_auth/weak-password]',
-            'Password should be at least 6 characters.')
-        .replaceAll('[firebase_auth/network-request-failed]',
-            'Network error. Please check your connection.');
+    if (error.contains('email-already-in-use')) {
+      return 'This email is already registered. Please use a different email or try logging in.';
+    } else if (error.contains('invalid-email')) {
+      return 'Invalid email address format.';
+    } else if (error.contains('weak-password')) {
+      return 'Password is too weak. Please use a stronger password.';
+    } else if (error.contains('network-request-failed')) {
+      return 'Network error. Please check your connection.';
+    } else {
+      return 'An error occurred. Please try again.';
+    }
   }
 
   Future<void> signup() async {
     setState(() {
       error = null;
-      _isLoading = true;
     });
 
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
     final confirmPassword = confirmPasswordController.text.trim();
 
-    if (email.isEmpty || !email.contains('@')) {
+    // Validate email with regex
+    if (!Validators.isValidEmail(email)) {
       setState(() {
-        error = 'Please enter a valid email.';
-        _isLoading = false;
+        error = 'Invalid email address. Please enter a valid email.';
       });
       return;
     }
-    if (password.length < 6) {
+
+    // Validate password strength
+    if (!Validators.isValidPassword(password)) {
+      final feedback = Validators.getPasswordFeedback(password);
       setState(() {
-        error = 'Password must be at least 6 characters.';
-        _isLoading = false;
+        error = feedback.isNotEmpty ? feedback : 'Password does not meet requirements:\n'
+            '• At least 8 characters\n'
+            '• One uppercase letter\n'
+            '• One lowercase letter\n'
+            '• One number\n'
+            '• One special character (@\$!%*?&)';
       });
       return;
     }
+
+    // Check if passwords match
     if (password != confirmPassword) {
       setState(() {
         error = 'Passwords do not match.';
-        _isLoading = false;
       });
       return;
     }
 
     try {
+      // Create user with email and password
       await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+
+      // Send email verification
+      await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+
+      // Show verification dialog immediately (use WidgetsBinding to ensure it shows)
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showVerificationDialog(email);
+          }
+        });
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        error = _formatErrorMessage(e.code);
+      });
     } catch (e) {
       setState(() {
         error = _formatErrorMessage(e.toString());
-        _isLoading = false;
       });
     }
+  }
+
+  void _showVerificationDialog(String email) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true, // Use root navigator to prevent StreamBuilder from closing it
+      builder: (context) => WillPopScope(
+        onWillPop: () async => false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.mark_email_read, color: Colors.green, size: 28),
+              SizedBox(width: 12),
+              Text('Check Your Email'),
+            ],
+          ),
+          content: Text(
+            'A verification email has been sent to:\n$email\n\n'
+            'Please check your email and click the verification link to verify your account.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                // Cancel - sign out and close dialog
+                await FirebaseAuth.instance.signOut();
+                if (mounted) {
+                  Navigator.of(context).pop();
+                  emailController.clear();
+                  passwordController.clear();
+                  confirmPasswordController.clear();
+                  setState(() {
+                    error = null;
+                  });
+                }
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                // Check if user is verified
+                await FirebaseAuth.instance.currentUser?.reload();
+                final isVerified = FirebaseAuth.instance.currentUser?.emailVerified ?? false;
+                
+                if (isVerified) {
+                  // User is verified - close dialog and navigate to home
+                  if (mounted) {
+                    Navigator.of(context).pop();
+                    // StreamBuilder will automatically navigate to HomeScreen
+                  }
+                } else {
+                  // Not verified yet - show error
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('You are not verified yet. Please check your email.'),
+                        backgroundColor: Colors.orange,
+                        duration: Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: const Text('I am Verified'),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) {
+      // If dialog is dismissed and user is not verified, sign them out
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && !user.emailVerified) {
+        FirebaseAuth.instance.signOut();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      body: Container( 
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topRight,
@@ -208,154 +323,60 @@ class _SignupScreenState extends State<SignupScreen>
                       child: Column(
                         children: [
                           // Email Field
-                          TextFormField(
+                          CustomTextField(
                             controller: emailController,
+                            labelText: 'Email Address',
+                            hintText: 'Enter your email',
+                            icon: Icons.email_outlined,
                             keyboardType: TextInputType.emailAddress,
-                            decoration: InputDecoration(
-                              labelText: 'Email Address',
-                              hintText: 'Enter your email',
-                              prefixIcon: Container(
-                                margin: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple.shade50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.email_outlined,
-                                  color: Colors.deepPurple,
-                                ),
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                            ),
                           ),
                           const SizedBox(height: 16),
 
                           // Password Field
-                          TextFormField(
+                          CustomTextField(
                             controller: passwordController,
+                            labelText: 'Password',
+                            hintText: 'Create a password',
+                            icon: Icons.lock_outline,
                             obscureText: !_passwordVisible,
-                            decoration: InputDecoration(
-                              labelText: 'Password',
-                              hintText: 'Create a password',
-                              prefixIcon: Container(
-                                margin: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple.shade50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.lock_outline,
-                                  color: Colors.deepPurple,
-                                ),
-                              ),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _passwordVisible
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                  color: Colors.grey.shade600,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _passwordVisible = !_passwordVisible;
-                                  });
-                                },
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                            ),
+                            showVisibilityToggle: true,
+                            onVisibilityToggle: () {
+                              setState(() {
+                                _passwordVisible = !_passwordVisible;
+                              });
+                            },
                           ),
+
+                          // Password Strength Indicator
+                          if (passwordController.text.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            PasswordStrengthIndicator(
+                              strength: _passwordStrength,
+                              feedback: _passwordFeedback,
+                            ),
+                          ],
+                          
                           const SizedBox(height: 16),
 
                           // Confirm Password Field
-                          TextFormField(
+                          CustomTextField(
                             controller: confirmPasswordController,
+                            labelText: 'Confirm Password',
+                            hintText: 'Re-enter your password',
+                            icon: Icons.lock_outline,
                             obscureText: !_confirmPasswordVisible,
-                            decoration: InputDecoration(
-                              labelText: 'Confirm Password',
-                              hintText: 'Re-enter your password',
-                              prefixIcon: Container(
-                                margin: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.purple.shade50,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(
-                                  Icons.lock_outline,
-                                  color: Colors.deepPurple,
-                                ),
-                              ),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _confirmPasswordVisible
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                  color: Colors.grey.shade600,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _confirmPasswordVisible =
-                                        !_confirmPasswordVisible;
-                                  });
-                                },
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
-                              ),
-                            ),
+                            showVisibilityToggle: true,
+                            onVisibilityToggle: () {
+                              setState(() {
+                                _confirmPasswordVisible = !_confirmPasswordVisible;
+                              });
+                            },
                           ),
 
                           // Error Message
                           if (error != null) ...[
                             const SizedBox(height: 16),
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red.shade200),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.error_outline,
-                                      color: Colors.red.shade700, size: 20),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      error!,
-                                      style: TextStyle(
-                                        color: Colors.red.shade700,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            ErrorMessage(message: error!),
                           ],
 
                           const SizedBox(height: 32),
@@ -365,7 +386,7 @@ class _SignupScreenState extends State<SignupScreen>
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : signup,
+                              onPressed: signup,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.deepPurple,
                                 foregroundColor: Colors.white,
@@ -375,25 +396,13 @@ class _SignupScreenState extends State<SignupScreen>
                                 elevation: 2,
                                 shadowColor: Colors.deepPurple.withOpacity(0.3),
                               ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
-                                      ),
-                                    )
-                                  : const Text(
-                                      'Create Account',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                              child: const Text(
+                                'Create Account',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           ),
                         ],

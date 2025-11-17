@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 import 'auth/login_screen.dart';
 import 'auth/signup_screen.dart';
@@ -8,7 +9,15 @@ import 'screens/home_screen.dart';
 import 'screens/splash_screen.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  
+  try {
+    // Preserve the native splash screen until Flutter is ready
+    // This may fail on some emulators, so we wrap it in try-catch
+    FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  } catch (e) {
+    print("⚠️ Native splash preserve failed (common on emulators): $e");
+  }
 
   try {
     // For Android, Firebase will auto-configure from google-services.json
@@ -18,6 +27,13 @@ void main() async {
     print("❌ Firebase initialization error: $e");
     // Continue running the app even if Firebase fails to initialize
     // The app will show appropriate error messages in the UI
+  }
+
+  try {
+    // Remove the native splash screen once initialization is complete
+    FlutterNativeSplash.remove();
+  } catch (e) {
+    print("⚠️ Native splash remove failed (common on emulators): $e");
   }
 
   runApp(const MyApp());
@@ -104,7 +120,7 @@ class _AuthGateState extends State<AuthGate> {
       return SplashScreen(onInitializationComplete: _onSplashComplete);
     }
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+      stream: FirebaseAuth.instance.userChanges(),
       builder: (context, snapshot) {
         // Handle authentication errors
         if (snapshot.hasError) {
@@ -147,7 +163,13 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         if (snapshot.hasData) {
-          return const HomeScreen();
+          // Only allow verified users to access HomeScreen
+          final user = snapshot.data!;
+          if (user.emailVerified) {
+            return const HomeScreen();
+          }
+          // If not verified, stay on auth screens (don't navigate)
+          // The signup/login screens will handle unverified users
         }
 
         return AnimatedSwitcher(

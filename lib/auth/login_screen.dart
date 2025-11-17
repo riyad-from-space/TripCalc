@@ -15,7 +15,6 @@ class _LoginScreenState extends State<LoginScreen>
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   String? error;
-  bool _isLoading = false;
   bool _passwordVisible = false;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -48,7 +47,6 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> login() async {
     setState(() {
       error = null;
-      _isLoading = true;
     });
 
     final email = emailController.text.trim();
@@ -58,7 +56,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (!Validators.isValidEmail(email)) {
       setState(() {
         error = 'Invalid email address. Please enter a valid email.';
-        _isLoading = false;
       });
       return;
     }
@@ -66,7 +63,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (password.isEmpty) {
       setState(() {
         error = 'Please enter your password.';
-        _isLoading = false;
       });
       return;
     }
@@ -81,10 +77,6 @@ class _LoginScreenState extends State<LoginScreen>
       if (userCredential.user != null && !userCredential.user!.emailVerified) {
         // Sign out immediately
         await FirebaseAuth.instance.signOut();
-        
-        setState(() {
-          _isLoading = false;
-        });
 
         // Show dialog - account doesn't exist (not verified means not activated)
         if (mounted) {
@@ -115,19 +107,13 @@ class _LoginScreenState extends State<LoginScreen>
         }
         return;
       }
-      
-      setState(() {
-        _isLoading = false;
-      });
     } on FirebaseAuthException catch (e) {
       setState(() {
         error = _formatErrorMessage(e.code);
-        _isLoading = false;
       });
     } catch (e) {
       setState(() {
         error = _formatErrorMessage(e.toString());
-        _isLoading = false;
       });
     }
   }
@@ -369,7 +355,7 @@ class _LoginScreenState extends State<LoginScreen>
                             width: double.infinity,
                             height: 56,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : login,
+                              onPressed: login,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.deepPurple,
                                 foregroundColor: Colors.white,
@@ -379,25 +365,13 @@ class _LoginScreenState extends State<LoginScreen>
                                 elevation: 2,
                                 shadowColor: Colors.deepPurple.withOpacity(0.3),
                               ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                          Colors.white,
-                                        ),
-                                      ),
-                                    )
-                                  : const Text(
-                                      'Sign In',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                              child: const Text(
+                                'Sign In',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           ),
                         ],
